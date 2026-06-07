@@ -26,10 +26,20 @@ const AdminProducts = () => {
     const fetchProducts = async () => {
         try {
             const res = await fetch('http://localhost:3001/api/products');
-            const data = await res.json();
-            setProducts(data);
+            if (res.ok) {
+                const data = await res.json();
+                setProducts(data);
+                localStorage.setItem('dosei_products', JSON.stringify(data));
+                return;
+            }
         } catch (err) {
-            console.error(err);
+            console.warn('Backend server offline. Fetching products from localStorage...');
+        }
+        const saved = localStorage.getItem('dosei_products');
+        if (saved) {
+            setProducts(JSON.parse(saved));
+        } else {
+            setProducts([]);
         }
     };
 
@@ -62,7 +72,8 @@ const AdminProducts = () => {
         setSuccessMsg('');
 
         const formData = new FormData();
-        formData.append('sku', editingProduct ? editingProduct.id : Math.random().toString(36).substr(2, 4).toUpperCase());
+        const productSku = editingProduct ? editingProduct.id : Math.random().toString(36).substr(2, 4).toUpperCase();
+        formData.append('sku', productSku);
         formData.append('name', name);
         formData.append('price', price);
         formData.append('tag', tag);
@@ -87,12 +98,52 @@ const AdminProducts = () => {
                 setSuccessMsg(editingProduct ? 'PRODUCT UPDATED SUCCESSFULLY' : 'PRODUCT ARCHIVED SUCCESSFULLY');
                 resetForm();
                 fetchProducts();
+                setLoading(false);
+                return;
             } else {
-                setErrorMsg(data.error || 'SERVER ERROR - CHECK CONSOLE');
+                throw new Error(data.error || 'Server error');
             }
         } catch (err) {
-            setErrorMsg('CONNECTION FAILED — IS THE SERVER RUNNING?');
-            console.error(err);
+            console.warn('Backend server connection failed. Updating localStorage locally...', err);
+            
+            const saved = localStorage.getItem('dosei_products');
+            let currentProducts = saved ? JSON.parse(saved) : [];
+            
+            let imageUrls = [...existingImages];
+            if (selectedImages && selectedImages.length > 0) {
+                selectedImages.forEach(() => {
+                    imageUrls.push("https://images.unsplash.com/photo-1523381210434-271e8be1f52b?q=80&w=800");
+                });
+            }
+            if (imageUrls.length === 0) {
+                imageUrls.push("https://images.unsplash.com/photo-1523381210434-271e8be1f52b?q=80&w=800");
+            }
+
+            const mockProduct = {
+                internal_id: editingProduct ? editingProduct.internal_id : Date.now(),
+                id: productSku,
+                name: name,
+                price_raw: parseFloat(price) || 0,
+                price: `${price} MAD`,
+                tag: tag,
+                category_name: category.charAt(0).toUpperCase() + category.slice(1),
+                category: category,
+                description: description,
+                images: imageUrls,
+                stocks: stocks,
+                isOutOfStock: Object.values(stocks).reduce((acc, curr) => acc + curr, 0) === 0
+            };
+
+            if (editingProduct) {
+                currentProducts = currentProducts.map(p => p.id === editingProduct.id ? mockProduct : p);
+            } else {
+                currentProducts.unshift(mockProduct);
+            }
+
+            localStorage.setItem('dosei_products', JSON.stringify(currentProducts));
+            setSuccessMsg(editingProduct ? 'PRODUCT UPDATED LOCALLY (OFFLINE MODE)' : 'PRODUCT ARCHIVED LOCALLY (OFFLINE MODE)');
+            resetForm();
+            fetchProducts();
         } finally {
             setLoading(false);
         }
@@ -105,9 +156,19 @@ const AdminProducts = () => {
             if (res.ok) {
                 setSuccessMsg('ENTRY DELETED');
                 fetchProducts();
+                return;
             }
         } catch (err) {
-            console.error(err);
+            console.warn('Backend server offline. Deleting product locally...');
+        }
+        
+        const saved = localStorage.getItem('dosei_products');
+        if (saved) {
+            let currentProducts = JSON.parse(saved);
+            currentProducts = currentProducts.filter(p => p.id !== sku);
+            localStorage.setItem('dosei_products', JSON.stringify(currentProducts));
+            setSuccessMsg('ENTRY DELETED LOCALLY (OFFLINE MODE)');
+            fetchProducts();
         }
     };
 
@@ -121,7 +182,7 @@ const AdminProducts = () => {
         if (p.stocks && Object.keys(p.stocks).length > 0) {
             setStocks({ S: 0, M: 0, L: 0, XL: 0, XXL: 0, XXXL: 0, ...p.stocks });
         }
-        setExistingImages(p.images || []); // load all existing images
+        setExistingImages(p.images || []);
         setSelectedImages([]);
         setErrorMsg('');
         setSuccessMsg('');
@@ -130,19 +191,31 @@ const AdminProducts = () => {
 
     const removeExistingImage = async (imageUrl) => {
         if (!editingProduct) return;
-        // Optimistically remove from UI immediately
         setExistingImages(prev => prev.filter(img => img !== imageUrl));
         try {
-            await fetch(`http://localhost:3001/api/products/${editingProduct.id}/images`, {
+            const res = await fetch(`http://localhost:3001/api/products/${editingProduct.id}/images`, {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ imageUrl })
             });
+            if (res.ok) return;
         } catch (err) {
-            console.error('Failed to delete image:', err);
-            // Re-add the image if the request failed
-            setExistingImages(prev => [...prev, imageUrl]);
-            setErrorMsg('Failed to delete image from server.');
+            console.warn('Backend server offline. Removing image locally...');
+        }
+        
+        const saved = localStorage.getItem('dosei_products');
+        if (saved) {
+            let currentProducts = JSON.parse(saved);
+            currentProducts = currentProducts.map(p => {
+                if (p.id === editingProduct.id) {
+                    return {
+                        ...p,
+                        images: p.images.filter(img => img !== imageUrl)
+                    };
+                }
+                return p;
+            });
+            localStorage.setItem('dosei_products', JSON.stringify(currentProducts));
         }
     };
 
