@@ -11,7 +11,7 @@ const Home = ({ products, onAddToCart, onProductClick, onExplore }) => (
                 playsInline
                 className="hero-video"
             >
-                <source src="/fury.mp4" type="video/mp4" />
+                <source src={`${import.meta.env.BASE_URL}fury.mp4`} type="video/mp4" />
             </video>
 
             <div className="hero-cta-wrap" style={{ position: 'absolute', bottom: '15%', zIndex: 10 }}>
